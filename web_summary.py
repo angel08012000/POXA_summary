@@ -3,42 +3,84 @@ from selenium.webdriver.common.by import By
 from openai import OpenAI
 
 import time
-from config import TABS
+from config import EXAMPLE_FILE_PATH, TABS
 
 # 自動生成摘要
-def auto_summary(plain_text, h2_titles, all_titles):
+def auto_summary(plain_text, tab_button, h2_titles, all_titles):
 
-    with open("summary_example.txt", 'r', encoding='utf-8') as file:
+    with open(EXAMPLE_FILE_PATH, 'r', encoding='utf-8') as file:
         output_sample = file.read()
 
     client = OpenAI()
 
-    # 請 GPT 幫忙過濾掉無關的文字
-    week_analysis = h2_titles[1]
-    temp = f"其中「本週主題分析」需要提到即時、補充"
-    temp += f"，除此之外，還要包含 {'、'.join(all_titles[week_analysis])}" if len(all_titles[week_analysis])!=0 else ""if len(all_titles[week_analysis])!=0 else ""
+    # 台電最新公告
+    lastest_announcement_prompt = ""
+    if any("台電最新公告" in title for title in h2_titles):
+        lastest_announcement_prompt += "其中「台電最新公告」若有多項，請列點說明。"
+
+    # 本週主題分析: 請 GPT 幫忙過濾掉無關的文字
+    week_analysis_prompt = ""
+    week_analysis = next(
+        (title for title in h2_titles if "本週主題分析" in title),
+        None
+    )
+    if week_analysis:
+        week_analysis_prompt += f"其中「本週主題分析」需要提到即時、補充"
+        week_analysis_prompt += (
+            f"，除此之外，還要包含 {'、'.join(all_titles[week_analysis])}" 
+            if len(all_titles[week_analysis]) != 0 else ""
+        )
+
+    # 市場最新動態
+    lastest_market_prompt = ""
+    if any("市場最新動態" in title for title in h2_titles):
+        if len(tab_button)==0:
+            index = next(i for i, title in enumerate(h2_titles) if "市場最新動態" in title)
+            h2_titles.pop(index)
+        else:
+            lastest_announcement_prompt += f"""
+            其中「市場最新動態」還須包含{len(tab_button)}個子標題{'、'.join(tab_button)}，每個子標題需換行，且需包含以下內容：
+            「平均結清價格(required)」、「平均結清價格較上週上升or下滑多少(required)」、「本週參與容量(required)」、
+            「參與容量較上週上升or下滑多少(required)」、「來自哪幾個廠商(optional)、對應的廠商名稱（required）、對應增加/減少的MW(optional)」，請用一句話描述，不需要分段。
+            """
+
+    # 台電電力供需資料
+    electric_info = ""
+    if any("台電電力供需資料" in title for title in h2_titles):
+        electric_info += f"""
+        其中「台電電力供需資料」一定會提到「再生能源占比(required)」、「滲透率(required)」。
+        """
+
+    # 下週預告
+    next_week = ""
+    if any("下週預告" in title for title in h2_titles):
+        next_week += f"""
+        其中「下週預告」只需要過濾掉不相關的文字，其餘直接複製貼上！
+        """
 
     messages = []
     messages.append({
         "role": "system",
         "content": f"""
-        您是一個直到獲取所有資訊後，才摘要重點的助手，會按照期望的輸出格式給予回覆，請依照以下標題 {h2_titles} 進行摘要。
-        {temp}
+        您是一個直到獲取所有資訊後，才摘要重點的助手，會按照期望的輸出格式給予回覆。
 
-        其中「台電最新公告」若有多項，請列點說明。
+        {lastest_announcement_prompt}
 
-        其中「市場最新動態」還須包含四個子標題「調頻備轉」、「E-dReg」、「即時備轉」、「補充備轉」，每個子標題需換行，且需包含以下內容：
-        「平均結清價格(required)」、「平均結清價格較上週上升or下滑多少(required)」、「本週參與容量(required)」、
-        「參與容量較上週上升or下滑多少(required)」、「來自哪幾個廠商(optional)、對應的廠商名稱（required）」，請用一句話描述，不需要分段。
-        其中「台電電力供需資料」一定會提到「再生能源占比(required)」、「滲透率(required)」。
+        {week_analysis_prompt}
         
-        其中「下週預告」只需要過濾掉不相關的文字，其餘直接複製貼上！
+        {lastest_market_prompt}
+        
+        {electric_info}
+        
+        {next_week}
+
+        輸出的標題必須包含{'、'.join(h2_titles)}。
         
         期望的輸出格式如下（它是過去的歷史資料，這只是給你參考輸出的格式，並非實際的數據，請不要參考其中的數據內容）:
         {output_sample}。
 
         而實際的數據如下:
-        {plain_text}
+        {plain_text}。
         """
         })
     
@@ -60,20 +102,30 @@ def auto_get_text(url):
     driver.get(url)
 
     plain_text = "📈 市場最新動態"
+    tab = []
 
     for tab_name, tab_value in TABS.items():
         # 點擊按鈕
         try:
             button = driver.find_element(By.CSS_SELECTOR, f'[data-service-tab-button="{tab_value}"]')
-            button.click()
-            time.sleep(1)  # 等待內容加載
+            if button:
+                button.click()
+                time.sleep(1)  # 等待內容加載
 
-            # 獲取顯示的內容
-            content_element = driver.find_element(By.CSS_SELECTOR, f'[data-service-tab-content="{tab_value}"]')
-            content = content_element.text.strip()  # 提取文字內容
-            plain_text += content
+                # 獲取顯示的內容
+                content_element = driver.find_element(By.CSS_SELECTOR, f'[data-service-tab-content="{tab_value}"]')
+                content = content_element.text.strip()  # 提取文字內容
+                plain_text += content
+
+                if tab_name=="dReg/sReg":
+                    tab.append("調頻備轉")
+                elif tab_name=="光儲合一":
+                    continue
+                else:
+                    tab.append(tab_name)
         except Exception as e:
             print(f"無法處理 {tab_name}，可能內容不存在或未顯示: {e}")
+            continue
 
     # 移除本週摘要
     need_remove = driver.find_element(By.XPATH, '//*[@id="本週摘要"]')
@@ -84,17 +136,15 @@ def auto_get_text(url):
     element = driver.find_element(By.CSS_SELECTOR, "#__next > div > div.relative.grid.justify-center > article")
     elements = element.find_elements(By.CSS_SELECTOR, 'h2, p, ul')
 
-    # print(len(p_elements))
-
     for e in elements:
         plain_text += f'\n{e.text}'
 
     driver.quit()
 
-    # with open("output/plain_text.txt", 'w', encoding='utf-8') as file:
+    # with open("plain_text.txt", 'w', encoding='utf-8') as file:
     #     file.write(plain_text)
 
-    return plain_text
+    return plain_text, tab
 
 def auto_get_title(url):
     options = webdriver.ChromeOptions()
@@ -121,9 +171,10 @@ def auto_get_title(url):
         else:
             titles[temp].append(h)
     
-    # print(f"蒐集到的標題: {titles}")
+    # print(f"蒐集到的標題: {h2_ids}")
+    # print(f"全部包含細項: {titles}")
 
     return h2_ids, titles
 
-# url = "https://info.poxa.io/report/20241111"
-# auto_summary(auto_get_text(url), *auto_get_title(url))
+# url = "https://info.poxa.io/report/20241125"
+# auto_summary(*auto_get_text(url), *auto_get_title(url))
