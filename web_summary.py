@@ -1,4 +1,6 @@
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from openai import OpenAI
 
@@ -85,7 +87,7 @@ def auto_summary(plain_text, tab_button, h2_titles, all_titles):
         })
     
     response = client.chat.completions.create(
-        model="gpt-4o-mini", 
+        model="gpt-4o", 
         messages=messages,
         temperature=0
     )
@@ -97,8 +99,13 @@ def auto_summary(plain_text, tab_button, h2_titles, all_titles):
 
 def auto_get_text(url):
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    driver = webdriver.Chrome(options=options)
+    options.add_argument("--headless")  # 啟用無頭模式
+    options.add_argument("--no-sandbox")  # 避免沙盒問題（推薦在 Linux 系統上加上這個參數）
+    options.add_argument("--disable-dev-shm-usage")  # 避免資源限制錯誤
+
+    # 自動下載並使用對應版本的 ChromeDriver
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     driver.get(url)
 
     plain_text = "📈 市場最新動態"
@@ -148,8 +155,13 @@ def auto_get_text(url):
 
 def auto_get_title(url):
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    driver = webdriver.Chrome(options=options)
+    options.add_argument("--headless")  # 啟用無頭模式
+    options.add_argument("--no-sandbox")  # 避免沙盒問題（推薦在 Linux 系統上加上這個參數）
+    options.add_argument("--disable-dev-shm-usage")  # 避免資源限制錯誤
+
+    # 自動下載並使用對應版本的 ChromeDriver
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     driver.get(url)
 
     h2_elements = driver.find_elements(By.TAG_NAME, 'h2')
